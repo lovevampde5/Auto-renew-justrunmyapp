@@ -48,7 +48,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+          # ❌ 删除了 cache: 'pip'，因为没有 requirements.txt 文件
 
       # 虚拟显示 + 物理点击工具（脚本用 xdotool 点 Turnstile）
       - name: Install Xvfb & xdotool
@@ -73,6 +73,7 @@ jobs:
       # 在虚拟显示下以非 headless 模式运行（脚本 headless=False）
       - name: Run renewal
         run: |
+          # ⚠️ 注意：请确保你仓库里的脚本文件名是 justrunmy_renew.py，如果是 app.py，请修改下面的命令
           xvfb-run -a --server-args="-screen 0 1920x1080x24 -ac" \
             python justrunmy_renew.py
 
