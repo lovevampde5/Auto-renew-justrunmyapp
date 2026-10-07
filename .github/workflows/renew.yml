@@ -1,0 +1,89 @@
+# JustRunMy.app 自动续期 - GitHub Actions 工作流
+# 用法：
+#   1. 把 jim 脚本放到仓库根目录并命名为 justrunmy_renew.py
+#   2. 在 GitHub 仓库 Settings -> Secrets and variables -> Actions 添加：
+#      - JUSTRUNMY_EMAIL   账号邮箱
+#      - JUSTRUNMY_PASSWORD 密码
+#      - TG_CHAT_ID        电报 chat_id（可选）
+#      - TG_BOT_TOKEN      电报 bot token（可选）
+#      - IS_PROXY          true/false（可选，默认直连）
+#   3. 手动触发：Actions -> JustRunMy Auto Renew -> Run workflow
+#   4. 计划触发：默认每天 04:00 UTC（北京时间 12:00）
+#
+# 注意：GitHub 定时任务只在“仓库 60 天内有活动”时运行，
+#       若长时间无提交，请改成手动触发或定期提交一次。
+
+name: JustRunMy Auto Renew
+
+on:
+  schedule:
+    # 每天 04:00 UTC = 北京时间 12:00（自由档计时器通常 3 天，每天跑更稳）
+    - cron: '0 4 * * *'
+  workflow_dispatch:        # 支持手动触发
+
+permissions:
+  contents: read            # 最小权限
+
+concurrency:
+  group: justrunmy-renew
+  cancel-in-progress: false # 上一次没跑完时不要取消，避免重复点按钮
+
+jobs:
+  renew:
+    name: Renew Free Tier Timer
+    runs-on: ubuntu-latest
+    timeout-minutes: 25      # 浏览器 + Turnstile 重试较耗时
+    env:
+      JUSTRUNMY_EMAIL: ${{ secrets.JUSTRUNMY_EMAIL }}
+      JUSTRUNMY_PASSWORD: ${{ secrets.JUSTRUNMY_PASSWORD }}
+      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+      IS_PROXY: ${{ secrets.IS_PROXY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # 虚拟显示 + 物理点击工具（脚本用 xdotool 点 Turnstile）
+      - name: Install Xvfb & xdotool
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q xvfb xdotool
+
+      # 安装真实 Chrome（24.04 用 apt 自动解决 t64 依赖名）
+      - name: Install Google Chrome
+        run: |
+          wget -q -O /tmp/google-chrome.deb \
+            https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo dpkg -i /tmp/google-chrome.deb 2>/dev/null || \
+            sudo apt-get install -y -f
+          google-chrome --version
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip -q
+          pip install seleniumbase requests
+
+      # 在虚拟显示下以非 headless 模式运行（脚本 headless=False）
+      - name: Run renewal
+        run: |
+          xvfb-run -a --server-args="-screen 0 1920x1080x24 -ac" \
+            python justrunmy_renew.py
+
+      # 失败时把截图和日志上传，便于排查
+      - name: Upload debug artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: justrunmy-debug
+          path: |
+            *.png
+            *.log
+          retention-days: 14
+          if-no-files-found: ignore
